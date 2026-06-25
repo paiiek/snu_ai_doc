@@ -1,0 +1,5 @@
+pymupdf>=1.24
+python-docx>=1.1
+# 아래 둘 중 가진 키에 맞는 것만 있어도 됩니다. (둘 다 깔아두면 둘 다 선택 가능)
+anthropic>=0.40        # Anthropic(Claude) API 사용 시
+openai>=1.40           # OpenAI(GPT) API 사용 시
