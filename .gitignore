@@ -3,6 +3,10 @@
 
 # API 키
 .env
+key.txt
+env.txt
+# 단, 예시 템플릿은 올린다
+!key.txt.example
 
 # 교수님 슬라이드 등 입력 자료 (저작권/개인정보)
 *.pdf
@@ -11,6 +15,13 @@
 *.docx
 # 예시용 docx는 예외로 허용
 !example*.docx
+
+# 한글/문서/압축 등 업무 자료 (개인정보·계약서 포함될 수 있음 — 절대 커밋 금지)
+*.hwp
+*.hwpx
+*.zip
+*.hnow
+전문가활용비/
 
 # === 파이썬 ===
 __pycache__/

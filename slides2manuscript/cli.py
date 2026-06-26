@@ -10,29 +10,73 @@ from . import __version__, generate, docx_writer, llm, prompts
 from .extract import extract_slides, total_source_chars, looks_like_image_pdf
 
 
+# 키를 적어 두는 파일 이름 후보. macOS Finder는 점(.)으로 시작하는 파일을
+# 만들지 못하므로, 점 없는 이름(key.txt 등)을 먼저 권장한다.
+KEY_FILENAMES = ("key.txt", "env.txt", ".env")
+
+
+def _key_dirs() -> list[str]:
+    """키 파일을 찾을 폴더: 현재 폴더 + 프로그램이 설치된 폴더."""
+    project = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    dirs = [os.getcwd(), project]
+    out: list[str] = []
+    for d in dirs:
+        if d not in out:
+            out.append(d)
+    return out
+
+
 def _load_dotenv() -> None:
-    """현재 폴더 또는 스크립트 폴더의 .env에서 키를 읽어 환경에 채운다.
+    """key.txt / env.txt / .env 에서 키를 읽어 환경에 채운다.
 
     별도 의존성 없이 KEY=VALUE 형식만 처리한다. 이미 설정된 환경변수는 덮지 않는다.
     """
-    candidates = [
-        os.path.join(os.getcwd(), ".env"),
-        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"),
-    ]
-    seen: set[str] = set()
-    for path in candidates:
-        if path in seen or not os.path.isfile(path):
-            continue
-        seen.add(path)
-        with open(path, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                key, _, val = line.partition("=")
-                key, val = key.strip(), val.strip().strip('"').strip("'")
-                if key and key not in os.environ:
-                    os.environ[key] = val
+    for d in _key_dirs():
+        for name in KEY_FILENAMES:
+            path = os.path.join(d, name)
+            if not os.path.isfile(path):
+                continue
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    key, _, val = line.partition("=")
+                    key, val = key.strip(), val.strip().strip('"').strip("'")
+                    if key and key not in os.environ:
+                        os.environ[key] = val
+
+
+def _has_key() -> bool:
+    return bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("OPENAI_API_KEY"))
+
+
+def _interactive_key_setup() -> None:
+    """키 파일이 없을 때, 화면에서 직접 키를 입력받아 key.txt 로 저장한다.
+
+    터미널(대화형)에서 실행할 때만 작동한다. 비개발자가 .env 파일을 손으로
+    만들지 않아도 되도록 돕는 안전망이다.
+    """
+    if not sys.stdin.isatty():
+        return
+    print("\nAPI 키가 아직 설정되어 있지 않습니다. 지금 입력하면 key.txt 에 저장해 둡니다.")
+    print("  1) Anthropic(클로드) 키 사용   2) OpenAI(GPT) 키 사용")
+    choice = input("번호 입력(1 또는 2): ").strip()
+    if choice == "2":
+        var, prefix = "OPENAI_API_KEY", "sk-"
+    else:
+        var, prefix = "ANTHROPIC_API_KEY", "sk-ant-"
+    key = input(f"{var} 값을 붙여넣고 엔터(예: {prefix}...): ").strip()
+    if not key:
+        return
+    os.environ[var] = key
+    path = os.path.join(os.getcwd(), "key.txt")
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(f"{var}={key}\n")
+        print(f"저장 완료: {path}\n")
+    except OSError as exc:
+        print(f"(key.txt 저장 실패: {exc} — 이번 실행에는 입력한 키를 그대로 사용합니다)\n")
 
 # A4 한 쪽에 실제로 들어가는 대략의 글자 수(맑은 고딕 11pt, 줄간격 1.5,
 # 여백 2.54cm, 문단 나눔 포함 기준). 쪽수 추정과 분량 목표 산정에 함께 쓴다.
@@ -79,6 +123,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     _load_dotenv()
+    if not _has_key():
+        _interactive_key_setup()
 
     if not os.path.isfile(args.pdf):
         print(f"입력 파일을 찾을 수 없습니다: {args.pdf}", file=sys.stderr)
