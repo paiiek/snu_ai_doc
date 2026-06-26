@@ -43,7 +43,8 @@ CHARS_PER_PAGE = 1200
 OVERSHOOT = 1.3
 
 # 분량 수렴 보정 최대 반복 횟수(범위를 벗어났을 때만 작동).
-MAX_CONVERGE_ROUNDS = 4
+# 분량 부족(35쪽 미만) 시 끝까지 끌어올려야 하므로 넉넉히 둔다.
+MAX_CONVERGE_ROUNDS = 6
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -54,9 +55,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("pdf", help="입력 슬라이드 PDF 경로(텍스트 기반)")
     p.add_argument("-o", "--out", help="출력 docx 경로(기본: 입력파일명_원고.docx)")
     p.add_argument("-t", "--title", default="", help="원고 맨 위 제목(기본: 없음)")
-    p.add_argument("--pages", type=int, default=27, help="목표(중앙값) A4 분량(기본: 27)")
-    p.add_argument("--min-pages", type=int, default=25, help="허용 최소 분량(기본: 25)")
-    p.add_argument("--max-pages", type=int, default=30, help="허용 최대 분량(기본: 30)")
+    p.add_argument("--pages", type=int, default=38, help="목표(중앙값) A4 분량(기본: 38)")
+    p.add_argument("--min-pages", type=int, default=35, help="허용 최소 분량(기본: 35, 무조건 보장)")
+    p.add_argument("--max-pages", type=int, default=50, help="허용 최대 분량(기본: 50)")
     p.add_argument("--provider", choices=("auto",) + llm.PROVIDERS, default="auto",
                    help="LLM 제공자(기본: auto = 설정된 키로 자동 선택). anthropic 또는 openai")
     p.add_argument("--model", default=None,
@@ -67,8 +68,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="OpenAI 호환 엔드포인트 주소(선택). OPENAI_BASE_URL 로도 지정 가능")
     p.add_argument("--chars-per-page", type=int, default=CHARS_PER_PAGE,
                    help=f"A4 한 쪽당 글자 수 환산값(기본: {CHARS_PER_PAGE})")
-    p.add_argument("--min-sections", type=int, default=6, help="최소 장 수(기본: 6)")
-    p.add_argument("--max-sections", type=int, default=12, help="최대 장 수(기본: 12)")
+    p.add_argument("--min-sections", type=int, default=8, help="최소 장 수(기본: 8)")
+    p.add_argument("--max-sections", type=int, default=16, help="최대 장 수(기본: 16)")
     p.add_argument("--force", action="store_true",
                    help="이미지/스캔 PDF로 의심돼도 그대로 진행")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -128,15 +129,18 @@ def main(argv: list[str] | None = None) -> int:
         if min_pages <= est <= max_pages:
             break
         before = chars
-        if est < min_pages:
-            print(f"      [보정 {rnd}] 분량 부족(~{est:.1f}쪽, 목표 {min_pages}~{max_pages}) → 장 확장")
+        was_short = est < min_pages
+        if was_short:
+            print(f"      [보정 {rnd}] 분량 부족(~{est:.1f}쪽, 목표 {min_pages}쪽 이상) → 장 확장")
             _expand(client, sections, slides, aim_chars, chars)
         else:
-            print(f"      [보정 {rnd}] 분량 초과(~{est:.1f}쪽, 목표 {min_pages}~{max_pages}) → 장 압축")
+            print(f"      [보정 {rnd}] 분량 초과(~{est:.1f}쪽, 상한 {max_pages}쪽) → 장 압축")
             _condense(client, sections, slides, aim_chars, chars)
         after = docx_writer.manuscript_char_count(sections)
-        if abs(after - before) < 0.015 * aim_chars:
-            print("      분량 변화가 거의 없어 보정을 멈춥니다(슬라이드 내용 한계).")
+        # 분량이 모자랄 때는 35쪽을 채울 때까지 라운드를 끝까지 쓴다.
+        # (넘쳐서 압축하는 경우에만, 변화가 없으면 조기 종료)
+        if not was_short and abs(after - before) < 0.015 * aim_chars:
+            print("      분량 변화가 거의 없어 보정을 멈춥니다.")
             break
 
     print(f"[4/4] docx 저장: {out_path}")
@@ -164,12 +168,8 @@ def _generate_all(client, sections, slides) -> None:
 def _expand(client, sections, slides, aim_chars: int, cur_chars: int) -> None:
     """슬라이드 원문이 풍부한 장부터 확장해 목표(aim) 분량에 다가간다."""
     deficit = aim_chars - cur_chars
-    ranked = sorted(
-        range(len(sections)),
-        key=lambda i: generate.section_source_chars(sections[i], slides),
-        reverse=True,
-    )
-    chosen = ranked[: max(1, len(sections) // 2)]
+    # 분량을 끌어올릴 때는 모든 장을 슬라이드 분량에 비례해 함께 확장한다.
+    chosen = list(range(len(sections)))
     wsum = sum(generate.section_source_chars(sections[i], slides) for i in chosen) or 1
     for i in sorted(chosen):
         src = generate.section_source_chars(sections[i], slides)
