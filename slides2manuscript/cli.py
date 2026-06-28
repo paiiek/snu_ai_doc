@@ -87,8 +87,21 @@ CHARS_PER_PAGE = 1200
 OVERSHOOT = 1.3
 
 # 분량 수렴 보정 최대 반복 횟수(범위를 벗어났을 때만 작동).
-# 분량 부족(35쪽 미만) 시 끝까지 끌어올려야 하므로 넉넉히 둔다.
-MAX_CONVERGE_ROUNDS = 6
+# 분량 부족 시 끝까지 끌어올려야 하므로 넉넉히 둔다(큰 목표 분량 대비).
+MAX_CONVERGE_ROUNDS = 8
+
+
+def _auto_sections(pages: int, given_min, given_max):
+    """목표 분량에 맞춰 장 수를 자동 산정한다(사용자가 지정하면 그 값 사용).
+
+    한 장이 약 2~3쪽(≈3,000자) 정도가 되도록 잡아, 장이 너무 길어
+    모델 출력 한도에서 잘리는 것을 막는다. 52·104쪽 같은 큰 목표도 커버한다.
+    """
+    min_s = given_min if given_min else max(8, round(pages / 3.5))
+    max_s = given_max if given_max else max(min_s + 2, round(pages / 2.2))
+    max_s = min(max_s, 45)          # 동시 실행/토큰 한도 고려한 상한
+    min_s = min(min_s, max_s)
+    return min_s, max_s
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -112,8 +125,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="OpenAI 호환 엔드포인트 주소(선택). OPENAI_BASE_URL 로도 지정 가능")
     p.add_argument("--chars-per-page", type=int, default=CHARS_PER_PAGE,
                    help=f"A4 한 쪽당 글자 수 환산값(기본: {CHARS_PER_PAGE})")
-    p.add_argument("--min-sections", type=int, default=8, help="최소 장 수(기본: 8)")
-    p.add_argument("--max-sections", type=int, default=16, help="최대 장 수(기본: 16)")
+    p.add_argument("--min-sections", type=int, default=None, help="최소 장 수(기본: 분량에 맞춰 자동)")
+    p.add_argument("--max-sections", type=int, default=None, help="최대 장 수(기본: 분량에 맞춰 자동)")
     p.add_argument("--force", action="store_true",
                    help="이미지/스캔 PDF로 의심돼도 그대로 진행")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -154,8 +167,10 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"[2/4] 장 구성 설계 (목표 약 {args.pages}쪽 / 본문 {page_chars:,}자, "
           f"{provider} / {client.model})")
+    min_sections, max_sections = _auto_sections(args.pages, args.min_sections, args.max_sections)
+    print(f"      (장 수 목표: {min_sections}~{max_sections})")
     sections = generate.design_outline(
-        client, slides, args.pages, args.min_sections, args.max_sections
+        client, slides, args.pages, min_sections, max_sections
     )
     generate.allocate_char_budget(sections, slides, total_target)
     for i, sec in enumerate(sections, 1):
