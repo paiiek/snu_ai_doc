@@ -104,6 +104,49 @@ def _auto_sections(pages: int, given_min, given_max):
     return min_s, max_s
 
 
+# 과제 기준별 "최소" 분량(쪽). 결과물은 반드시 이 쪽수 이상이 되어야 한다.
+# (강의 수, 구분) -> 최소 쪽수
+VOLUME_MIN = {
+    (1, "내부"): 35,
+    (1, "외부"): 52,
+    (2, "내부"): 70,
+    (2, "외부"): 104,
+}
+AIM_MARGIN = 3   # 최소를 안전하게 넘기도록 목표는 최소보다 이만큼 위로 잡는다.
+
+
+def _ask_volume(max_override):
+    """실행 시 1강/2강·내부/외부를 물어 최소 분량을 정한다. (aim, min, max) 반환."""
+    print("\n원고 분량 기준을 선택하세요. (그냥 엔터를 누르면 기본값)")
+    n = input("  강의 수 —  1) 1강(기본)   2) 2강 연속  : ").strip()
+    lectures = 2 if n == "2" else 1
+    s = input("  구분   —  1) 내부 35/70장(기본)   2) 외부 52/104장  : ").strip()
+    scope = "외부" if s == "2" else "내부"
+    min_p = VOLUME_MIN[(lectures, scope)]
+    aim_p = min_p + AIM_MARGIN
+    max_p = max_override or (aim_p + 20)
+    print(f"  → 선택: {lectures}강 {scope} · 최소 {min_p}쪽 이상 (목표 {aim_p}쪽)\n")
+    return aim_p, min_p, max_p
+
+
+def _resolve_volume(args):
+    """분량(aim, min, max)을 결정한다.
+
+    - 옵션(--pages/--min-pages)을 직접 주면 그것을 우선한다.
+    - 아무것도 안 주고 터미널이면 1강/2강·내부/외부를 물어본다.
+    - 비대화형(자동 실행 등)이면 기본값(1강 내부=최소 35쪽).
+    """
+    if args.pages or args.min_pages:
+        min_p = args.min_pages or max(1, args.pages - AIM_MARGIN)
+        aim_p = args.pages or (min_p + AIM_MARGIN)
+        max_p = args.max_pages or (aim_p + 20)
+        return aim_p, min_p, max_p
+    if sys.stdin.isatty():
+        return _ask_volume(args.max_pages)
+    min_p = 35
+    return min_p + AIM_MARGIN, min_p, (args.max_pages or min_p + AIM_MARGIN + 20)
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="slides2manuscript",
@@ -112,9 +155,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("pdf", help="입력 슬라이드 PDF 경로(텍스트 기반)")
     p.add_argument("-o", "--out", help="출력 docx 경로(기본: 입력파일명_원고.docx)")
     p.add_argument("-t", "--title", default="", help="원고 맨 위 제목(기본: 없음)")
-    p.add_argument("--pages", type=int, default=38, help="목표(중앙값) A4 분량(기본: 38)")
-    p.add_argument("--min-pages", type=int, default=35, help="허용 최소 분량(기본: 35, 무조건 보장)")
-    p.add_argument("--max-pages", type=int, default=50, help="허용 최대 분량(기본: 50)")
+    p.add_argument("--pages", type=int, default=None,
+                   help="목표(중앙값) A4 분량. 미지정 시 실행할 때 1강/2강·내부/외부를 물어봄")
+    p.add_argument("--min-pages", type=int, default=None, help="허용 최소 분량(무조건 보장)")
+    p.add_argument("--max-pages", type=int, default=None, help="허용 최대 분량")
     p.add_argument("--provider", choices=("auto",) + llm.PROVIDERS, default="auto",
                    help="LLM 제공자(기본: auto = 설정된 키로 자동 선택). anthropic 또는 openai")
     p.add_argument("--model", default=None,
@@ -160,17 +204,19 @@ def main(argv: list[str] | None = None) -> int:
               file=sys.stderr)
         return 4
 
+    pages, min_pages, max_pages = _resolve_volume(args)
+
     provider = llm.resolve_provider(args.provider)
     client = llm.LLMClient(provider, args.model, args.base_url)
-    page_chars = args.pages * args.chars_per_page
+    page_chars = pages * args.chars_per_page
     total_target = round(page_chars * OVERSHOOT)
 
-    print(f"[2/4] 장 구성 설계 (목표 약 {args.pages}쪽 / 본문 {page_chars:,}자, "
+    print(f"[2/4] 장 구성 설계 (최소 {min_pages}쪽 이상 / 목표 약 {pages}쪽 / 본문 {page_chars:,}자, "
           f"{provider} / {client.model})")
-    min_sections, max_sections = _auto_sections(args.pages, args.min_sections, args.max_sections)
+    min_sections, max_sections = _auto_sections(pages, args.min_sections, args.max_sections)
     print(f"      (장 수 목표: {min_sections}~{max_sections})")
     sections = generate.design_outline(
-        client, slides, args.pages, min_sections, max_sections
+        client, slides, pages, min_sections, max_sections
     )
     generate.allocate_char_budget(sections, slides, total_target)
     for i, sec in enumerate(sections, 1):
@@ -180,8 +226,7 @@ def main(argv: list[str] | None = None) -> int:
     _generate_all(client, sections, slides)
 
     cpp = args.chars_per_page
-    aim_chars = args.pages * cpp
-    min_pages, max_pages = args.min_pages, args.max_pages
+    aim_chars = pages * cpp
 
     # 분량 수렴: [min_pages, max_pages] 범위에 들 때까지 부족하면 확장, 넘치면 압축.
     for rnd in range(1, MAX_CONVERGE_ROUNDS + 1):
