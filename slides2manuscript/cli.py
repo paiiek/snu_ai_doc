@@ -8,6 +8,7 @@ import sys
 
 from . import __version__, generate, docx_writer, llm, prompts
 from .extract import extract_slides, total_source_chars, looks_like_image_pdf
+from .progress import Progress
 
 
 # 키를 적어 두는 파일 이름 후보. macOS Finder는 점(.)으로 시작하는 파일을
@@ -204,14 +205,13 @@ def main(argv: list[str] | None = None) -> int:
     client = llm.LLMClient(provider, args.model, args.base_url)
 
     if args.vision:
-        print(f"[1.5/4] 비전으로 슬라이드 읽는 중 ({len(slides)}장, {provider}/{client.model}) ...")
-
-        def _vp(done, total):
-            print(f"      {done}/{total}", end="\r", flush=True)
-
+        print(f"[1.5/4] 비전으로 슬라이드 읽는 중 ({len(slides)}장, {provider}/{client.model})")
         from . import vision
-        vision.enrich_slides(client, args.pdf, slides, workers=args.vision_workers, progress=_vp)
-        print(f"\n      보강 완료: 원문 {total_source_chars(slides):,}자")
+        vbar = Progress(len(slides), "비전 읽기")
+        vision.enrich_slides(client, args.pdf, slides, workers=args.vision_workers,
+                             progress=lambda done, total: vbar.update(done))
+        vbar.done()
+        print(f"      보강 완료: 원문 {total_source_chars(slides):,}자")
     else:
         if not nonempty:
             print("텍스트를 전혀 추출하지 못했습니다. 이미지/스캔 PDF로 보입니다.\n"
@@ -255,10 +255,10 @@ def main(argv: list[str] | None = None) -> int:
         was_short = est < min_pages
         if was_short:
             print(f"      [보정 {rnd}] 분량 부족(~{est:.1f}쪽, 목표 {min_pages}쪽 이상) → 장 확장")
-            _expand(client, sections, slides, aim_chars, chars)
+            _expand(client, sections, slides, aim_chars, chars, f"보정{rnd} 확장")
         else:
             print(f"      [보정 {rnd}] 분량 초과(~{est:.1f}쪽, 상한 {max_pages}쪽) → 장 압축")
-            _condense(client, sections, slides, aim_chars, chars)
+            _condense(client, sections, slides, aim_chars, chars, f"보정{rnd} 압축")
         after = docx_writer.manuscript_char_count(sections)
         # 분량이 모자랄 때는 35쪽을 채울 때까지 라운드를 끝까지 쓴다.
         # (넘쳐서 압축하는 경우에만, 변화가 없으면 조기 종료)
@@ -279,48 +279,54 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _generate_all(client, sections, slides) -> None:
+    bar = Progress(len(sections), "본문 생성")
     prev_tail = ""
     done_titles: list[str] = []
-    for i, sec in enumerate(sections, 1):
-        print(f"      ({i}/{len(sections)}) {sec.title} ...", flush=True)
+    for sec in sections:
         sec.body = generate.write_section(client, sec, slides, prev_tail, done_titles)
         prev_tail = sec.body
         done_titles.append(sec.title)
+        bar.update()
+    bar.done()
 
 
-def _expand(client, sections, slides, aim_chars: int, cur_chars: int) -> None:
+def _expand(client, sections, slides, aim_chars: int, cur_chars: int, label: str) -> None:
     """슬라이드 원문이 풍부한 장부터 확장해 목표(aim) 분량에 다가간다."""
     deficit = aim_chars - cur_chars
     # 분량을 끌어올릴 때는 모든 장을 슬라이드 분량에 비례해 함께 확장한다.
     chosen = list(range(len(sections)))
     wsum = sum(generate.section_source_chars(sections[i], slides) for i in chosen) or 1
+    bar = Progress(len(chosen), label)
     for i in sorted(chosen):
         src = generate.section_source_chars(sections[i], slides)
         add = deficit * src / wsum
-        if add < 150:
-            continue
-        sections[i].target_chars = round((len(sections[i].body) + add) * OVERSHOOT)
-        _regen(client, sections, slides, i,
-               prompts.EXPAND_HINT.format(target_chars=sections[i].target_chars))
+        if add >= 150:
+            sections[i].target_chars = round((len(sections[i].body) + add) * OVERSHOOT)
+            _regen(client, sections, slides, i,
+                   prompts.EXPAND_HINT.format(target_chars=sections[i].target_chars))
+        bar.update()
+    bar.done()
 
 
-def _condense(client, sections, slides, aim_chars: int, cur_chars: int) -> None:
+def _condense(client, sections, slides, aim_chars: int, cur_chars: int, label: str) -> None:
     """가장 긴 장부터 압축해 목표(aim) 분량으로 줄인다."""
     excess = cur_chars - aim_chars
     ranked = sorted(range(len(sections)), key=lambda i: len(sections[i].body), reverse=True)
     chosen = ranked[: max(1, len(sections) // 2)]
     wsum = sum(len(sections[i].body) for i in chosen) or 1
+    bar = Progress(len(chosen), label)
     for i in sorted(chosen):
         cut = excess * len(sections[i].body) / wsum
         sections[i].target_chars = max(400, round(len(sections[i].body) - cut))
         _regen(client, sections, slides, i,
                prompts.CONDENSE_HINT.format(target_chars=sections[i].target_chars))
+        bar.update()
+    bar.done()
 
 
 def _regen(client, sections, slides, i: int, hint: str) -> None:
     prev_tail = sections[i - 1].body if i > 0 else ""
     toc = [s.title for s in sections[:i]]
-    print(f"        · {sections[i].title} 재작성(목표 {sections[i].target_chars:,}자)", flush=True)
     sections[i].body = generate.write_section(client, sections[i], slides, prev_tail, toc, hint)
 
 
