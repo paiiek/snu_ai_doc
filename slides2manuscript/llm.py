@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import base64
 import os
 
 # provider별 기본 모델. 자연스러운 한국어 산문 품질을 우선해 상위 모델을 둔다.
@@ -82,6 +83,52 @@ class LLMClient:
             )
         except Exception as exc:  # noqa: BLE001
             # 일부 신형 모델은 max_tokens 대신 max_completion_tokens 를 요구한다.
+            if "max_tokens" in str(exc) or "max_completion_tokens" in str(exc):
+                resp = self._client.chat.completions.create(
+                    model=self.model, max_completion_tokens=max_tokens, messages=messages
+                )
+            else:
+                raise
+        return (resp.choices[0].message.content or "").strip()
+
+    def vision_chat(self, system: str, user: str, images: list[bytes], max_tokens: int) -> str:
+        """이미지(PNG 바이트) 여러 장과 함께 질의한다. 기본 모델은 둘 다 비전 지원."""
+        if self.provider == "anthropic":
+            content = [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": base64.b64encode(png).decode(),
+                    },
+                }
+                for png in images
+            ]
+            content.append({"type": "text", "text": user})
+            resp = self._client.messages.create(
+                model=self.model,
+                max_tokens=max_tokens,
+                system=system,
+                messages=[{"role": "user", "content": content}],
+            )
+            return "".join(b.text for b in resp.content if b.type == "text").strip()
+
+        content = [{"type": "text", "text": user}]
+        for png in images:
+            data = base64.b64encode(png).decode()
+            content.append(
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{data}"}}
+            )
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": content},
+        ]
+        try:
+            resp = self._client.chat.completions.create(
+                model=self.model, max_tokens=max_tokens, messages=messages
+            )
+        except Exception as exc:  # noqa: BLE001
             if "max_tokens" in str(exc) or "max_completion_tokens" in str(exc):
                 resp = self._client.chat.completions.create(
                     model=self.model, max_completion_tokens=max_tokens, messages=messages

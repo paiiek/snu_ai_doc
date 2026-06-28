@@ -167,6 +167,11 @@ def build_parser() -> argparse.ArgumentParser:
                         f"openai→{llm.DEFAULT_MODELS['openai']}")
     p.add_argument("--base-url", default=None,
                    help="OpenAI 호환 엔드포인트 주소(선택). OPENAI_BASE_URL 로도 지정 가능")
+    p.add_argument("--vision", action="store_true",
+                   help="슬라이드를 이미지로 읽어 그림·도표·수식까지 반영(텍스트 적은 자료 권장). "
+                        "비전 호출이 슬라이드 수만큼 추가돼 비용·시간이 늘어남")
+    p.add_argument("--vision-workers", type=int, default=4,
+                   help="비전 읽기 동시 처리 수(기본: 4)")
     p.add_argument("--chars-per-page", type=int, default=CHARS_PER_PAGE,
                    help=f"A4 한 쪽당 글자 수 환산값(기본: {CHARS_PER_PAGE})")
     p.add_argument("--min-sections", type=int, default=None, help="최소 장 수(기본: 분량에 맞춰 자동)")
@@ -195,19 +200,31 @@ def main(argv: list[str] | None = None) -> int:
     print(f"      슬라이드 {len(slides)}장, 텍스트 있는 슬라이드 {len(nonempty)}장, "
           f"원문 {total_source_chars(slides):,}자")
 
-    if not nonempty:
-        print("텍스트를 전혀 추출하지 못했습니다. 이미지/스캔 PDF로 보입니다.", file=sys.stderr)
-        return 3
-    if looks_like_image_pdf(slides) and not args.force:
-        print("경고: 텍스트가 매우 적어 이미지/스캔 PDF로 의심됩니다.\n"
-              "      이 도구는 텍스트 기반 PDF용입니다. 그래도 진행하려면 --force 를 붙이세요.",
-              file=sys.stderr)
-        return 4
-
-    pages, min_pages, max_pages = _resolve_volume(args)
-
     provider = llm.resolve_provider(args.provider)
     client = llm.LLMClient(provider, args.model, args.base_url)
+
+    if args.vision:
+        print(f"[1.5/4] 비전으로 슬라이드 읽는 중 ({len(slides)}장, {provider}/{client.model}) ...")
+
+        def _vp(done, total):
+            print(f"      {done}/{total}", end="\r", flush=True)
+
+        from . import vision
+        vision.enrich_slides(client, args.pdf, slides, workers=args.vision_workers, progress=_vp)
+        print(f"\n      보강 완료: 원문 {total_source_chars(slides):,}자")
+    else:
+        if not nonempty:
+            print("텍스트를 전혀 추출하지 못했습니다. 이미지/스캔 PDF로 보입니다.\n"
+                  "      --vision 을 붙이면 슬라이드 이미지를 읽어 처리할 수 있습니다.",
+                  file=sys.stderr)
+            return 3
+        if looks_like_image_pdf(slides) and not args.force:
+            print("경고: 텍스트가 매우 적어 이미지/스캔 PDF로 의심됩니다.\n"
+                  "      --vision 으로 그림·도표까지 읽거나, 그대로 진행하려면 --force 를 붙이세요.",
+                  file=sys.stderr)
+            return 4
+
+    pages, min_pages, max_pages = _resolve_volume(args)
     page_chars = pages * args.chars_per_page
     total_target = round(page_chars * OVERSHOOT)
 

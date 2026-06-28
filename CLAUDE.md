@@ -32,24 +32,28 @@
 ```
 make_manuscript.py            # 진입 스크립트 (python make_manuscript.py 강의.pdf)
 slides2manuscript/
-  cli.py          # argparse, 4단계 파이프라인 오케스트레이션
+  cli.py          # argparse, 파이프라인 오케스트레이션, 분량 질문(_resolve_volume),
+                  #   장 수 자동 산정(_auto_sections), 분량 수렴(_expand/_condense), 키 설정
   extract.py      # PyMuPDF로 슬라이드별 텍스트 추출 + 이미지PDF 감지
-  prompts.py      # 모든 프롬프트(아웃라인/장 본문) + STYLE_RULES  ← 톤의 단일 출처
-  generate.py     # Anthropic API 호출: design_outline → write_section, 분량 배분
+  vision.py       # (--vision) 슬라이드를 이미지로 렌더링 → 비전 모델로 내용 보강(병렬)
+  llm.py          # provider 추상화(anthropic/openai): chat / vision_chat
+  prompts.py      # 모든 프롬프트(아웃라인/장 본문/확장·압축) + STYLE_RULES  ← 톤의 단일 출처
+  generate.py     # design_outline → write_section, 분량 배분
   docx_writer.py  # 드라이 docx 출력(한글 글꼴 강제, A4/여백/줄간격 고정)
 ```
 
-파이프라인: 추출 → 장 구성 설계(1콜) → 장별 본문 생성(장 수만큼 콜) → docx 저장.
+파이프라인: 추출 → (선택)비전 보강 → 장 구성 설계(1콜) → 장별 본문 생성(장 수만큼 콜)
+→ 분량 수렴 보정 → docx 저장.
 
 ## 작업 규칙
 
 - **유료 API 호출 주의.** `generate.py`의 실호출(`messages.create`)은 사용자 키로
   과금된다. 사용자가 명시적으로 요청하지 않는 한 실제 PDF로 전체 파이프라인을
   돌리지 마라. 로직 검증은 API를 타지 않는 경로(extract/docx/fallback/budget)로 한다.
-- **텍스트 기반 PDF 전용.** 이미지/스캔 PDF는 기본적으로 막는다(`--force`로만 강행).
-  OCR·비전 입력은 현재 범위 밖이다. 도입하려면 사용자와 먼저 합의한다.
+- **텍스트 기반 PDF가 기본.** 텍스트가 적은 이미지/스캔 PDF는 기본적으로 막고(`--force`),
+  `--vision`이면 슬라이드를 이미지로 읽어 처리한다(`vision.py`, 슬라이드당 비전 1콜 추가).
 - 기본 모델은 `claude-opus-4-8`(자연스러운 한국어 우선). 비용 옵션은 `--model claude-sonnet-4-6`.
-- 의존성은 최소로 유지한다(pymupdf, anthropic, python-docx). 배포 단순성이 중요하다.
+- 의존성은 최소로 유지한다(pymupdf, anthropic, openai, python-docx). 배포 단순성이 중요하다.
 - 한국어 주석/메시지를 유지한다. 사용자와 다른 조교가 읽는다.
 
 ## 테스트
