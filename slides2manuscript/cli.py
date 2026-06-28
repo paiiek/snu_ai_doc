@@ -256,15 +256,19 @@ def main(argv: list[str] | None = None) -> int:
         if was_short:
             print(f"      [보정 {rnd}] 분량 부족(~{est:.1f}쪽, 목표 {min_pages}쪽 이상) → 장 확장")
             _expand(client, sections, slides, aim_chars, chars, f"보정{rnd} 확장")
+            after = docx_writer.manuscript_char_count(sections)
+            # 확장이 정체되면 장을 쪼개 용량을 늘려 최소 분량을 채운다.
+            if after - before < 0.01 * aim_chars:
+                if not _split_for_capacity(client, sections, slides):
+                    print("      더 늘릴 여지가 없어 보정을 멈춥니다(슬라이드 내용 한계).")
+                    break
         else:
             print(f"      [보정 {rnd}] 분량 초과(~{est:.1f}쪽, 상한 {max_pages}쪽) → 장 압축")
             _condense(client, sections, slides, aim_chars, chars, f"보정{rnd} 압축")
-        after = docx_writer.manuscript_char_count(sections)
-        # 분량이 모자랄 때는 35쪽을 채울 때까지 라운드를 끝까지 쓴다.
-        # (넘쳐서 압축하는 경우에만, 변화가 없으면 조기 종료)
-        if not was_short and abs(after - before) < 0.015 * aim_chars:
-            print("      분량 변화가 거의 없어 보정을 멈춥니다.")
-            break
+            after = docx_writer.manuscript_char_count(sections)
+            if before - after < 0.015 * aim_chars:
+                print("      분량 변화가 거의 없어 보정을 멈춥니다.")
+                break
 
     print(f"[4/4] docx 저장: {out_path}")
     docx_writer.write_docx(out_path, args.title, sections)
@@ -303,7 +307,8 @@ def _expand(client, sections, slides, aim_chars: int, cur_chars: int, label: str
         if add >= 150:
             sections[i].target_chars = round((len(sections[i].body) + add) * OVERSHOOT)
             _regen(client, sections, slides, i,
-                   prompts.EXPAND_HINT.format(target_chars=sections[i].target_chars))
+                   prompts.EXPAND_HINT.format(target_chars=sections[i].target_chars),
+                   mode="grow")
         bar.update()
     bar.done()
 
@@ -319,15 +324,46 @@ def _condense(client, sections, slides, aim_chars: int, cur_chars: int, label: s
         cut = excess * len(sections[i].body) / wsum
         sections[i].target_chars = max(400, round(len(sections[i].body) - cut))
         _regen(client, sections, slides, i,
-               prompts.CONDENSE_HINT.format(target_chars=sections[i].target_chars))
+               prompts.CONDENSE_HINT.format(target_chars=sections[i].target_chars),
+               mode="shrink")
         bar.update()
     bar.done()
 
 
-def _regen(client, sections, slides, i: int, hint: str) -> None:
+def _regen(client, sections, slides, i: int, hint: str, mode: str = "free") -> None:
+    """장을 다시 생성한다.
+
+    mode="grow"   : 새 본문이 더 길 때만 채택(확장이 줄어들지 않게 → 단조 증가)
+    mode="shrink" : 새 본문이 더 짧을 때만 채택(압축이 늘어나지 않게 → 단조 감소)
+    mode="free"   : 무조건 교체(신규 장 생성 등)
+    """
+    old = sections[i].body
     prev_tail = sections[i - 1].body if i > 0 else ""
     toc = [s.title for s in sections[:i]]
-    sections[i].body = generate.write_section(client, sections[i], slides, prev_tail, toc, hint)
+    new = generate.write_section(client, sections[i], slides, prev_tail, toc, hint)
+    if mode == "grow":
+        sections[i].body = new if len(new) > len(old) else old
+    elif mode == "shrink":
+        sections[i].body = new if 200 < len(new) < len(old) else old
+    else:
+        sections[i].body = new
+
+
+def _split_for_capacity(client, sections, slides) -> bool:
+    """확장이 정체될 때, 슬라이드 2장 이상인 가장 긴 장을 둘로 나눠 용량을 늘린다."""
+    cand = [(i, s) for i, s in enumerate(sections) if s.end > s.start]
+    if not cand:
+        return False
+    i, sec = max(cand, key=lambda t: len(t[1].body))
+    mid = (sec.start + sec.end) // 2
+    half = max(1800, round(len(sec.body) / 2 * 1.2))
+    a = generate.Section(sec.title, sec.start, mid, target_chars=half)
+    b = generate.Section(sec.title + " (계속)", mid + 1, sec.end, target_chars=half)
+    sections[i:i + 1] = [a, b]
+    print(f"      · 정체 → 장 분할: '{sec.title}' (S{sec.start}-S{sec.end})를 둘로 나눠 재작성")
+    _regen(client, sections, slides, i, "", mode="free")
+    _regen(client, sections, slides, i + 1, "", mode="free")
+    return True
 
 
 def _default_out(pdf_path: str) -> str:
