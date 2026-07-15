@@ -6,7 +6,7 @@ import argparse
 import os
 import sys
 
-from . import __version__, generate, docx_writer, llm, prompts, refs as refs_mod, pdf_export
+from . import __version__, generate, docx_writer, llm, prompts, refs as refs_mod, pdf_export, font_setup
 from .extract import extract_slides, total_source_chars, looks_like_image_pdf
 from .progress import Progress
 
@@ -50,6 +50,32 @@ def _load_dotenv() -> None:
 
 def _has_key() -> bool:
     return bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("OPENAI_API_KEY"))
+
+
+def _ensure_myungjo_font(user_font: str | None) -> None:
+    """명조체 폰트가 하나도 없으면 사용자에게 물어 나눔명조를 자동 설치한다.
+
+    - 사용자가 `--font` 로 폰트 이름을 명시했으면, 그 폰트가 있는지만 확인하고
+      없으면 경고만 띄운다(임의 대체 안 함).
+    - 대화형 터미널이 아니면 자동 설치 없이 경고만.
+    """
+    if user_font:
+        if not font_setup.is_font_installed(user_font):
+            print(f"경고: 지정한 폰트 '{user_font}' 를 시스템에서 찾지 못했습니다. "
+                  "PDF에서 대체 폰트로 렌더링될 수 있습니다.")
+        return
+    if font_setup.has_myungjo_font():
+        return
+    print("\n명조체 폰트가 시스템에 없습니다. 규격(신명조)에 맞추려면 명조체가 필요합니다.")
+    if not sys.stdin.isatty():
+        print("  자동 설치를 원하면 `--install-font` 로 다시 실행하세요.")
+        return
+    ans = input("나눔명조(OFL, 자유 사용)를 지금 자동 설치하시겠습니까? [Y/n]: ").strip().lower()
+    if ans in ("", "y", "yes"):
+        ok, msg = font_setup.install_nanum_myeongjo()
+        print(("  " + msg) if ok else f"  실패: {msg}")
+    else:
+        print("  건너뜁니다. 원할 때 `--install-font` 로 언제든 설치할 수 있습니다.")
 
 
 def _interactive_key_setup() -> None:
@@ -160,7 +186,8 @@ def build_parser() -> argparse.ArgumentParser:
         prog="slides2manuscript",
         description="강의 슬라이드 PDF를 줄글 강의 원고(docx)로 변환한다.",
     )
-    p.add_argument("pdf", help="입력 슬라이드 PDF 경로(텍스트 기반)")
+    p.add_argument("pdf", nargs="?", help="입력 슬라이드 PDF 경로(텍스트 기반). "
+                   "`--install-font` 만 실행할 때는 생략 가능")
     p.add_argument("-o", "--out", help="출력 docx 경로(기본: 입력파일명_원고.docx)")
     p.add_argument("-t", "--title", default="", help="원고 맨 위 제목(기본: 없음)")
     p.add_argument("--pages", type=int, default=None,
@@ -195,17 +222,34 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-pdf", action="store_true",
                    help="docx 저장 후 pdf도 함께 만드는 기본 동작을 끈다")
     p.add_argument("--font", default=None, metavar="NAME",
-                   help="본문 폰트 이름. 미지정 시 OS별 기본 명조체 자동 선택 "
-                        "(macOS→AppleMyungjo, Windows→바탕, Linux→NanumMyeongjo)")
+                   help="본문 폰트 이름. 미지정 시 나눔명조(설치돼 있으면) → OS별 기본 명조체 순으로 자동 선택")
+    p.add_argument("--install-font", action="store_true",
+                   help="나눔명조(OFL 라이선스)를 사용자 폰트 폴더에 자동 다운로드·설치하고 종료. "
+                        "명조체 폰트가 없어 PDF가 산세리프로 렌더링되는 문제를 해결한다.")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return p
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+
+    # 폰트 자동 설치 모드: PDF 인자 없이도 실행 가능. 설치 후 종료.
+    if args.install_font:
+        ok, msg = font_setup.install_nanum_myeongjo(force=True)
+        print(("[폰트 설치 성공] " if ok else "[폰트 설치 실패] ") + msg)
+        return 0 if ok else 1
+
+    if not args.pdf:
+        print("입력 PDF 경로가 필요합니다. `--install-font` 만 실행하려면 옵션만 주세요.",
+              file=sys.stderr)
+        return 2
+
     _load_dotenv()
     if not _has_key():
         _interactive_key_setup()
+
+    # 명조체 폰트가 하나도 없으면(=PDF 규격이 깨지는 상태) 대화형으로 자동 설치 유도.
+    _ensure_myungjo_font(args.font)
 
     if not os.path.isfile(args.pdf):
         print(f"입력 파일을 찾을 수 없습니다: {args.pdf}", file=sys.stderr)

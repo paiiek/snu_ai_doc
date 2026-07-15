@@ -18,6 +18,7 @@ from docx.enum.text import WD_LINE_SPACING
 from docx.shared import Cm, Mm, Pt
 from docx.oxml.ns import qn
 
+from . import font_setup
 from .generate import Section
 
 
@@ -25,18 +26,23 @@ def _default_body_font() -> str:
     """생성 시점 OS에 실제로 존재하는 명조체 폰트 이름을 반환한다.
 
     규격은 "신명조"지만 이 이름의 폰트가 시스템에 없으면 LibreOffice·Word가
-    엉뚱한 산세리프로 대체해 버려 명조체 규격이 깨진다. 그래서 각 OS의 기본
-    명조체를 지정해 두고, `--font` 로 override 가능하게 한다.
+    엉뚱한 산세리프로 대체해 버려 명조체 규격이 깨진다. 그래서:
+    - 먼저 나눔명조(OFL, 자동 설치 가능)가 있으면 그것을 쓰고,
+    - 없으면 각 OS 기본 명조체로 폴백한다.
+    `--font` 로 override 가능.
     """
+    # 나눔명조는 --install-font 로 이 도구가 설치해 준 것일 가능성이 높다.
+    # 크로스 플랫폼으로 렌더링 결과가 가장 일관돼 우선한다.
+    # macOS LibreOffice/Core Text 는 primary family name(한글 "나눔명조")으로만 매칭되므로,
+    # 파일 존재를 확인한 뒤 docx 에 넣는 이름은 한글 이름을 쓴다.
+    if font_setup.is_font_installed("NanumMyeongjo"):
+        return "나눔명조"
     system = platform.system()
     if system == "Darwin":
-        # macOS 기본 제공 명조체
         if os.path.exists("/System/Library/Fonts/Supplemental/AppleMyungjo.ttf"):
             return "AppleMyungjo"
     if system == "Windows":
-        # Windows 한국어 기본 명조체
         return "바탕"
-    # Linux / 기타: 나눔명조가 흔함(설치돼 있어야 함)
     return "NanumMyeongjo"
 
 

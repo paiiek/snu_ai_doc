@@ -22,7 +22,7 @@
 
 1. 파이썬(Python) 설치
 2. 이 프로그램 내려받기
-3. 라이브러리 설치
+3. 라이브러리 + 명조체 폰트(나눔명조) 설치
 4. API 키 발급
 5. 키를 프로그램에 알려주기 (실행하면 물어봄 — 가장 쉬움)
 6. 실행
@@ -93,6 +93,18 @@ git clone https://github.com/paiiek/snu_ai_doc.git
    pip3 install -r requirements.txt
    ```
    (윈도우에서 `pip3` 가 안 되면 `pip install -r requirements.txt`)
+
+4. **명조체 폰트(나눔명조) 자동 설치.** 규격이 "신명조"인데 컴퓨터에 명조체가
+   없으면 PDF가 산세리프로 잘못 렌더링됩니다. 아래 한 줄로 나눔명조 3종
+   (Regular/Bold/ExtraBold, OFL 라이선스, Google Fonts에서 배포)을 사용자
+   폰트 폴더에 자동으로 받아 깝니다.
+   ```
+   python3 make_manuscript.py --install-font
+   ```
+   (윈도우에서는 `python make_manuscript.py --install-font`)
+
+   > 이 단계를 건너뛰어도, 다음 실행 시 명조체가 없으면 자동으로 물어봅니다.
+   > `--font "함초롬바탕"` 처럼 다른 명조체를 쓰고 싶으면 실행 시 지정할 수 있습니다.
 
 ---
 
@@ -194,7 +206,8 @@ python3 make_manuscript.py "강의1.pdf" -t "1주차: 인공지능 개요" -o "1
 | `--ref-file` | 참고 자료 파일(.txt/.md/.pdf/.docx). 여러 개 지정 가능 | `--ref-file 강사소개.txt 커리큘럼.pdf` |
 | `--ref-url` | 참고 자료 URL. 강사 홈페이지·전시 소개 등의 본문 텍스트를 근거로 추가 | `--ref-url https://.../artist-bio` |
 | `--no-pdf` | docx 저장 후 pdf도 함께 만드는 기본 동작을 끔 | `--no-pdf` |
-| `--font` | 본문 폰트 이름(미지정 시 OS별 기본 명조체 자동 선택) | `--font "바탕"` |
+| `--font` | 본문 폰트 이름(미지정 시 나눔명조 → OS별 기본 명조체 순으로 자동 선택) | `--font "바탕"` |
+| `--install-font` | 나눔명조를 자동 다운로드·설치하고 종료 (PDF 인자 없이 실행 가능) | `--install-font` |
 
 ### 결과물: docx + pdf 두 벌
 기본적으로 원고 생성이 끝나면 같은 폴더에 **docx 와 pdf 를 함께** 저장합니다.
