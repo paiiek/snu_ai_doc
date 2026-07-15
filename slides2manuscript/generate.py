@@ -63,6 +63,7 @@ def design_outline(
     pages: int,
     min_sections: int,
     max_sections: int,
+    refs_block: str = "",
 ) -> list[Section]:
     full_block = _slides_block(slides, slides[0].index, slides[-1].index)
     user = prompts.OUTLINE_USER_TEMPLATE.format(
@@ -70,6 +71,7 @@ def design_outline(
         min_sections=min_sections,
         max_sections=max_sections,
         slides_block=full_block,
+        refs_block=refs_block,
     )
     try:
         raw = _call_text(client, prompts.OUTLINE_SYSTEM, user, OUTLINE_MAX_TOKENS)
@@ -140,6 +142,7 @@ def write_section(
     prev_tail: str,
     toc_titles: list[str],
     hint: str = "",
+    refs_block: str = "",
 ) -> str:
     block = _slides_block(slides, section.start, section.end)
     if prev_tail:
@@ -158,5 +161,6 @@ def write_section(
         hint_block=hint_block,
         context_block=context_block,
         slides_block=block,
+        refs_block=refs_block,
     )
     return _call_text(client, prompts.SECTION_SYSTEM, user, SECTION_MAX_TOKENS)

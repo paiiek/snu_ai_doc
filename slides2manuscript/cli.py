@@ -6,7 +6,7 @@ import argparse
 import os
 import sys
 
-from . import __version__, generate, docx_writer, llm, prompts
+from . import __version__, generate, docx_writer, llm, prompts, refs as refs_mod
 from .extract import extract_slides, total_source_chars, looks_like_image_pdf
 from .progress import Progress
 
@@ -179,6 +179,12 @@ def build_parser() -> argparse.ArgumentParser:
                    help=f"A4 한 쪽당 글자 수 환산값(기본: {CHARS_PER_PAGE})")
     p.add_argument("--min-sections", type=int, default=None, help="최소 장 수(기본: 분량에 맞춰 자동)")
     p.add_argument("--max-sections", type=int, default=None, help="최대 장 수(기본: 분량에 맞춰 자동)")
+    p.add_argument("--ref-file", nargs="+", default=None, metavar="PATH",
+                   help="참고 자료 파일(.txt/.md/.pdf/.docx). 여러 개 지정 가능. "
+                        "강사 홈페이지에서 복사한 텍스트, 수업 안내서 등 슬라이드 외 근거로 쓰인다.")
+    p.add_argument("--ref-url", nargs="+", default=None, metavar="URL",
+                   help="참고 자료 URL. 강사 홈페이지 등 페이지 본문 텍스트를 추출해 근거로 쓴다. "
+                        "사이트 구조에 따라 추출이 완벽하지 않을 수 있어, 중요한 자료는 파일로 넘기는 편이 안전하다.")
     p.add_argument("--force", action="store_true",
                    help="이미지/스캔 PDF로 의심돼도 그대로 진행")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -202,6 +208,13 @@ def main(argv: list[str] | None = None) -> int:
     nonempty = [s for s in slides if s.text]
     print(f"      슬라이드 {len(slides)}장, 텍스트 있는 슬라이드 {len(nonempty)}장, "
           f"원문 {total_source_chars(slides):,}자")
+
+    loaded_refs = refs_mod.load_refs(args.ref_file, args.ref_url)
+    if loaded_refs:
+        print(f"      참고 자료 {len(loaded_refs)}건, 총 {refs_mod.total_chars(loaded_refs):,}자")
+        for r in loaded_refs:
+            print(f"        · [{r.label}] {r.source} ({len(r.text):,}자)")
+    refs_block_text = refs_mod.refs_block(loaded_refs)
 
     provider = llm.resolve_provider(args.provider)
     client = llm.LLMClient(provider, args.model, args.base_url)
@@ -235,14 +248,14 @@ def main(argv: list[str] | None = None) -> int:
     min_sections, max_sections = _auto_sections(pages, args.min_sections, args.max_sections)
     print(f"      (장 수 목표: {min_sections}~{max_sections})")
     sections = generate.design_outline(
-        client, slides, pages, min_sections, max_sections
+        client, slides, pages, min_sections, max_sections, refs_block_text
     )
     generate.allocate_char_budget(sections, slides, total_target)
     for i, sec in enumerate(sections, 1):
         print(f"      {i:>2}. {sec.title}  (S{sec.start}-S{sec.end}, 목표 {sec.target_chars:,}자)")
 
     print(f"[3/4] 본문 생성 ({len(sections)}개 장)")
-    _generate_all(client, sections, slides)
+    _generate_all(client, sections, slides, refs_block_text)
 
     cpp = args.chars_per_page
     aim_chars = pages * cpp
@@ -257,16 +270,16 @@ def main(argv: list[str] | None = None) -> int:
         was_short = est < min_pages
         if was_short:
             print(f"      [보정 {rnd}] 분량 부족(~{est:.1f}쪽, 목표 {min_pages}쪽 이상) → 장 확장")
-            _expand(client, sections, slides, aim_chars, chars, f"보정{rnd} 확장")
+            _expand(client, sections, slides, aim_chars, chars, f"보정{rnd} 확장", refs_block_text)
             after = docx_writer.manuscript_char_count(sections)
             # 확장이 정체되면 장을 쪼개 용량을 늘려 최소 분량을 채운다.
             if after - before < 0.01 * aim_chars:
-                if not _split_for_capacity(client, sections, slides):
+                if not _split_for_capacity(client, sections, slides, refs_block_text):
                     print("      더 늘릴 여지가 없어 보정을 멈춥니다(슬라이드 내용 한계).")
                     break
         else:
             print(f"      [보정 {rnd}] 분량 초과(~{est:.1f}쪽, 상한 {max_pages}쪽) → 장 압축")
-            _condense(client, sections, slides, aim_chars, chars, f"보정{rnd} 압축")
+            _condense(client, sections, slides, aim_chars, chars, f"보정{rnd} 압축", refs_block_text)
             after = docx_writer.manuscript_char_count(sections)
             if before - after < 0.015 * aim_chars:
                 print("      분량 변화가 거의 없어 보정을 멈춥니다.")
@@ -284,19 +297,22 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _generate_all(client, sections, slides) -> None:
+def _generate_all(client, sections, slides, refs_block: str = "") -> None:
     bar = Progress(len(sections), "본문 생성")
     prev_tail = ""
     done_titles: list[str] = []
     for sec in sections:
-        sec.body = generate.write_section(client, sec, slides, prev_tail, done_titles)
+        sec.body = generate.write_section(
+            client, sec, slides, prev_tail, done_titles, refs_block=refs_block
+        )
         prev_tail = sec.body
         done_titles.append(sec.title)
         bar.update()
     bar.done()
 
 
-def _expand(client, sections, slides, aim_chars: int, cur_chars: int, label: str) -> None:
+def _expand(client, sections, slides, aim_chars: int, cur_chars: int, label: str,
+            refs_block: str = "") -> None:
     """슬라이드 원문이 풍부한 장부터 확장해 목표(aim) 분량에 다가간다."""
     deficit = aim_chars - cur_chars
     # 분량을 끌어올릴 때는 모든 장을 슬라이드 분량에 비례해 함께 확장한다.
@@ -310,12 +326,13 @@ def _expand(client, sections, slides, aim_chars: int, cur_chars: int, label: str
             sections[i].target_chars = round((len(sections[i].body) + add) * OVERSHOOT)
             _regen(client, sections, slides, i,
                    prompts.EXPAND_HINT.format(target_chars=sections[i].target_chars),
-                   mode="grow")
+                   mode="grow", refs_block=refs_block)
         bar.update()
     bar.done()
 
 
-def _condense(client, sections, slides, aim_chars: int, cur_chars: int, label: str) -> None:
+def _condense(client, sections, slides, aim_chars: int, cur_chars: int, label: str,
+              refs_block: str = "") -> None:
     """가장 긴 장부터 압축해 목표(aim) 분량으로 줄인다."""
     excess = cur_chars - aim_chars
     ranked = sorted(range(len(sections)), key=lambda i: len(sections[i].body), reverse=True)
@@ -327,12 +344,13 @@ def _condense(client, sections, slides, aim_chars: int, cur_chars: int, label: s
         sections[i].target_chars = max(400, round(len(sections[i].body) - cut))
         _regen(client, sections, slides, i,
                prompts.CONDENSE_HINT.format(target_chars=sections[i].target_chars),
-               mode="shrink")
+               mode="shrink", refs_block=refs_block)
         bar.update()
     bar.done()
 
 
-def _regen(client, sections, slides, i: int, hint: str, mode: str = "free") -> None:
+def _regen(client, sections, slides, i: int, hint: str, mode: str = "free",
+           refs_block: str = "") -> None:
     """장을 다시 생성한다.
 
     mode="grow"   : 새 본문이 더 길 때만 채택(확장이 줄어들지 않게 → 단조 증가)
@@ -342,7 +360,9 @@ def _regen(client, sections, slides, i: int, hint: str, mode: str = "free") -> N
     old = sections[i].body
     prev_tail = sections[i - 1].body if i > 0 else ""
     toc = [s.title for s in sections[:i]]
-    new = generate.write_section(client, sections[i], slides, prev_tail, toc, hint)
+    new = generate.write_section(
+        client, sections[i], slides, prev_tail, toc, hint, refs_block=refs_block
+    )
     if mode == "grow":
         sections[i].body = new if len(new) > len(old) else old
     elif mode == "shrink":
@@ -351,7 +371,7 @@ def _regen(client, sections, slides, i: int, hint: str, mode: str = "free") -> N
         sections[i].body = new
 
 
-def _split_for_capacity(client, sections, slides) -> bool:
+def _split_for_capacity(client, sections, slides, refs_block: str = "") -> bool:
     """확장이 정체될 때, 슬라이드 2장 이상인 가장 긴 장을 둘로 나눠 용량을 늘린다."""
     cand = [(i, s) for i, s in enumerate(sections) if s.end > s.start]
     if not cand:
@@ -363,8 +383,8 @@ def _split_for_capacity(client, sections, slides) -> bool:
     b = generate.Section(sec.title + " (계속)", mid + 1, sec.end, target_chars=half)
     sections[i:i + 1] = [a, b]
     print(f"      · 정체 → 장 분할: '{sec.title}' (S{sec.start}-S{sec.end})를 둘로 나눠 재작성")
-    _regen(client, sections, slides, i, "", mode="free")
-    _regen(client, sections, slides, i + 1, "", mode="free")
+    _regen(client, sections, slides, i, "", mode="free", refs_block=refs_block)
+    _regen(client, sections, slides, i + 1, "", mode="free", refs_block=refs_block)
     return True
 
 
