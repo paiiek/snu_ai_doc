@@ -6,7 +6,7 @@ import argparse
 import os
 import sys
 
-from . import __version__, generate, docx_writer, llm, prompts, refs as refs_mod
+from . import __version__, generate, docx_writer, llm, prompts, refs as refs_mod, pdf_export
 from .extract import extract_slides, total_source_chars, looks_like_image_pdf
 from .progress import Progress
 
@@ -192,6 +192,8 @@ def build_parser() -> argparse.ArgumentParser:
                         "사이트 구조에 따라 추출이 완벽하지 않을 수 있어, 중요한 자료는 파일로 넘기는 편이 안전하다.")
     p.add_argument("--force", action="store_true",
                    help="이미지/스캔 PDF로 의심돼도 그대로 진행")
+    p.add_argument("--no-pdf", action="store_true",
+                   help="docx 저장 후 pdf도 함께 만드는 기본 동작을 끈다")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return p
 
@@ -292,6 +294,13 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"[4/4] docx 저장: {out_path}")
     docx_writer.write_docx(out_path, args.title, sections)
+
+    if not args.no_pdf:
+        pdf_path, info = pdf_export.convert_to_pdf(out_path)
+        if pdf_path:
+            print(f"       pdf 저장: {pdf_path}  ({info})")
+        else:
+            print(f"       pdf 생성 건너뜀: {info}")
 
     chars = docx_writer.manuscript_char_count(sections)
     est_pages = chars / cpp

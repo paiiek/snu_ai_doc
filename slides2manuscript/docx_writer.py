@@ -21,9 +21,13 @@ BODY_FONT = "신명조"
 BODY_SIZE = 12
 HEADING_SIZE = 13
 TITLE_SIZE = 15
-# A4(297mm) - 상하 여백 30mm = 267mm 안에 35줄이 들어가도록 줄 높이를 잡는다.
-# 267mm / 35줄 ≈ 7.62mm/줄 ≈ 21.6pt. MULTIPLE 1.8 은 12pt × 1.8 = 21.6pt.
-LINE_SPACING_MULTIPLE = 1.8
+# A4(297mm) - 상하 여백 30mm = 267mm 안에 35줄이 들어가도록 줄 높이를 EXACTLY로 고정한다.
+# 267mm / 35줄 ≈ 7.62mm/줄 ≈ 21.6pt.
+# 다만 LibreOffice·Word는 페이지 하단에 안전 여백을 남기고 렌더링해서 21.6pt로 두면
+# 실제 34줄만 나오는 경우가 있다. 21.0pt로 살짝 좁혀 35줄이 확실히 들어가도록 한다.
+# MULTIPLE 은 워드프로세서마다 해석이 달라(폰트 metrics × multiplier) 줄 수가 안 맞는 경우가 있어
+# EXACT 방식으로 못박는다.
+LINE_HEIGHT_PT = 21.0
 
 
 def _apply_rfonts(rpr, name: str) -> None:
@@ -46,8 +50,8 @@ def _base_style(doc: Document) -> None:
     style.font.size = Pt(BODY_SIZE)
     _apply_rfonts(style.element.get_or_add_rPr(), BODY_FONT)
     pf = style.paragraph_format
-    pf.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
-    pf.line_spacing = LINE_SPACING_MULTIPLE
+    pf.line_spacing_rule = WD_LINE_SPACING.EXACTLY
+    pf.line_spacing = Pt(LINE_HEIGHT_PT)
     # 35줄/1페이지 정확성을 지키기 위해 문단 사이 추가 여백은 두지 않는다.
     pf.space_after = Pt(0)
     pf.space_before = Pt(0)

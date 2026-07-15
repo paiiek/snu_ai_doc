@@ -48,10 +48,11 @@ slides2manuscript/
   prompts.py      # 모든 프롬프트(아웃라인/장 본문/확장·압축) + STYLE_RULES  ← 톤의 단일 출처
   generate.py     # design_outline → write_section, 분량 배분
   docx_writer.py  # 드라이 docx 출력(한글 글꼴 강제, A4/여백/줄간격 고정)
+  pdf_export.py   # docx → pdf 자동 변환. LibreOffice(soffice) 우선, 없으면 docx2pdf(=Word)
 ```
 
 파이프라인: 추출 → (선택)비전 보강 → 장 구성 설계(1콜) → 장별 본문 생성(장 수만큼 콜)
-→ 분량 수렴 보정 → docx 저장.
+→ 분량 수렴 보정 → docx 저장 → (기본 동작) pdf 변환.
 
 ## 작업 규칙
 
