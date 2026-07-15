@@ -194,6 +194,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="이미지/스캔 PDF로 의심돼도 그대로 진행")
     p.add_argument("--no-pdf", action="store_true",
                    help="docx 저장 후 pdf도 함께 만드는 기본 동작을 끈다")
+    p.add_argument("--font", default=None, metavar="NAME",
+                   help="본문 폰트 이름. 미지정 시 OS별 기본 명조체 자동 선택 "
+                        "(macOS→AppleMyungjo, Windows→바탕, Linux→NanumMyeongjo)")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return p
 
@@ -293,7 +296,7 @@ def main(argv: list[str] | None = None) -> int:
                 break
 
     print(f"[4/4] docx 저장: {out_path}")
-    docx_writer.write_docx(out_path, args.title, sections)
+    docx_writer.write_docx(out_path, args.title, sections, body_font=args.font)
 
     if not args.no_pdf:
         pdf_path, info = pdf_export.convert_to_pdf(out_path)
