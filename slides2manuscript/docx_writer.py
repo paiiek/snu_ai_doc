@@ -2,21 +2,28 @@
 
 서식 원칙: 본문 글꼴 하나, 장 제목만 약간 키움, 색·표·테두리·머리글 없음.
 한국어 A4 기준으로 분량 계산이 맞도록 글꼴/줄간격/여백을 고정한다.
+
+공식 규격(전문가 활용비 강의료 및 원고료 책정표):
+- A4 1페이지: 12Font / 35Line, 신명조
+- 상하 여백 15mm, 좌우 여백 20mm, 머리말·꼬리말 15mm
 """
 
 from __future__ import annotations
 
 from docx import Document
 from docx.enum.text import WD_LINE_SPACING
-from docx.shared import Cm, Pt
+from docx.shared import Cm, Mm, Pt
 from docx.oxml.ns import qn
 
 from .generate import Section
 
-BODY_FONT = "맑은 고딕"
-BODY_SIZE = 11
+BODY_FONT = "신명조"
+BODY_SIZE = 12
 HEADING_SIZE = 13
-TITLE_SIZE = 16
+TITLE_SIZE = 15
+# A4(297mm) - 상하 여백 30mm = 267mm 안에 35줄이 들어가도록 줄 높이를 잡는다.
+# 267mm / 35줄 ≈ 7.62mm/줄 ≈ 21.6pt. MULTIPLE 1.8 은 12pt × 1.8 = 21.6pt.
+LINE_SPACING_MULTIPLE = 1.8
 
 
 def _apply_rfonts(rpr, name: str) -> None:
@@ -40,16 +47,20 @@ def _base_style(doc: Document) -> None:
     _apply_rfonts(style.element.get_or_add_rPr(), BODY_FONT)
     pf = style.paragraph_format
     pf.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
-    pf.line_spacing = 1.5
-    pf.space_after = Pt(6)
+    pf.line_spacing = LINE_SPACING_MULTIPLE
+    # 35줄/1페이지 정확성을 지키기 위해 문단 사이 추가 여백은 두지 않는다.
+    pf.space_after = Pt(0)
+    pf.space_before = Pt(0)
 
     for section in doc.sections:
         section.page_height = Cm(29.7)
         section.page_width = Cm(21.0)
-        section.top_margin = Cm(2.54)
-        section.bottom_margin = Cm(2.54)
-        section.left_margin = Cm(2.54)
-        section.right_margin = Cm(2.54)
+        section.top_margin = Mm(15)
+        section.bottom_margin = Mm(15)
+        section.left_margin = Mm(20)
+        section.right_margin = Mm(20)
+        section.header_distance = Mm(15)
+        section.footer_distance = Mm(15)
 
 
 def _add_paragraph(doc: Document, text: str, size: int, bold: bool, space_before: int = 0):
