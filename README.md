@@ -203,6 +203,7 @@ python3 make_manuscript.py "강의1.pdf" -t "1주차: 인공지능 개요" -o "1
 | `--model` | 사용할 AI 모델(비용 절감용) | `--model claude-sonnet-4-6` |
 | `--provider` | `anthropic` 또는 `openai` 강제 지정 | `--provider openai` |
 | `--vision` | 슬라이드 그림·도표·수식까지 읽어 반영 | `--vision` |
+| `--no-auto-vision` | 텍스트가 얇을 때 vision 활성화 여부를 물어보는 자동 감지를 끔 | `--no-auto-vision` |
 | `--ref-file` | 참고 자료 파일(.txt/.md/.pdf/.docx). 여러 개 지정 가능 | `--ref-file 강사소개.txt 커리큘럼.pdf` |
 | `--ref-url` | 참고 자료 URL. 강사 홈페이지·전시 소개 등의 본문 텍스트를 근거로 추가 | `--ref-url https://.../artist-bio` |
 | `--no-pdf` | docx 저장 후 pdf도 함께 만드는 기본 동작을 끔 | `--no-pdf` |
