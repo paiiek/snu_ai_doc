@@ -208,6 +208,36 @@ python3 make_manuscript.py "강의1.pdf" -t "1주차: 인공지능 개요" -o "1
 | `--no-pdf` | docx 저장 후 pdf도 함께 만드는 기본 동작을 끔 | `--no-pdf` |
 | `--font` | 본문 폰트 이름(미지정 시 나눔명조 → OS별 기본 명조체 순으로 자동 선택) | `--font "바탕"` |
 | `--install-font` | 나눔명조를 자동 다운로드·설치하고 종료 (PDF 인자 없이 실행 가능) | `--install-font` |
+| `--author` | 표지에 넣을 강사명 | `--author "홍길동 (서울대학교 언론정보학과)"` |
+| `--date` | 표지에 넣을 강의 날짜 | `--date "2026년 6월 24일"` |
+| `--no-title-page` | 표지 페이지를 생략 | `--no-title-page` |
+| `--no-toc` | 목차 페이지를 생략 | `--no-toc` |
+| `--ref-bibliography` | 원고 뒤 참고자료 페이지 항목들 | `--ref-bibliography "Lin et al. (2022). TruthfulQA..." "Ji et al. (2023). Survey of Hallucination..."` |
+
+### 원고 구성: 표지 · 목차 · 본문 · 참고자료
+기본 동작으로 원고는 **표지(강의 제목·강사·날짜) → 목차 → 본문(장별 페이지 분리) →
+참고자료(선택)** 순서로 구성됩니다. 표지의 강의 제목은 `-t/--title`, 강사·날짜는
+`--author`/`--date` 로 지정합니다. 목차는 각 장의 실제 시작 페이지 번호를 자동으로
+채워 넣습니다(2-pass 렌더링: 초안 저장 → PDF로 페이지 실측 → 페이지 번호 채워
+재저장). 표지·목차가 필요 없으면 `--no-title-page`/`--no-toc` 로 끕니다.
+
+원고 뒤에 참고자료 페이지를 넣으려면 `--ref-bibliography` 로 항목을 하나씩 넘깁니다.
+```
+python3 make_manuscript.py "강의.pdf" \
+  --author "홍길동 (서울대학교 언론정보학과)" \
+  --date "2026년 6월 24일" \
+  --ref-bibliography \
+    "Lin, S., Hilton, J., & Evans, O. (2022). TruthfulQA. ACL 2022." \
+    "Ji, Z. et al. (2023). Survey of Hallucination in NLG. ACM Computing Surveys, 55(12)."
+```
+
+> ⚠️ **참고자료에 '강의 슬라이드'·'발표 슬라이드' 항목은 넣지 마세요.** 슬라이드 자체는
+> 원고의 근거가 되지만, 콘진원 제출용 원고의 참고자료로는 들어가지 않는 것이 관례입니다.
+> 학술 논문·서적·기사 등 실제 인용한 자료만 목록에 넣습니다.
+
+> `--ref-bibliography`(원고 뒷장의 참고문헌 목록)는 `--ref-file`/`--ref-url`(원고 생성
+> 프롬프트에 근거로 주입하는 자료)과 목적이 다릅니다. 전자는 원고 결과물의 일부이고,
+> 후자는 원고 생성 과정에서 AI에 보여 주는 자료입니다.
 
 ### 결과물: docx + pdf 두 벌
 기본적으로 원고 생성이 끝나면 같은 폴더에 **docx 와 pdf 를 함께** 저장합니다.

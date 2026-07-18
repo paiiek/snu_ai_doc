@@ -21,7 +21,11 @@ env.txt
 *.hwpx
 *.zip
 *.hnow
+*.xlsx
+*.xls
+~$*
 전문가활용비/
+전문가활용비자료/
 
 # === 파이썬 ===
 __pycache__/

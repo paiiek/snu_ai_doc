@@ -227,6 +227,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--install-font", action="store_true",
                    help="나눔명조(OFL 라이선스)를 사용자 폰트 폴더에 자동 다운로드·설치하고 종료. "
                         "명조체 폰트가 없어 PDF가 산세리프로 렌더링되는 문제를 해결한다.")
+    p.add_argument("--author", default=None, metavar="NAME",
+                   help="표지에 넣을 강사명(예: '홍길동 (서울대학교 XX학과)'). "
+                        "미지정 시 표지에 강사명 생략.")
+    p.add_argument("--date", default=None, metavar="DATE",
+                   help="표지에 넣을 강의 날짜(예: '2026년 6월 24일'). 미지정 시 표지에 날짜 생략.")
+    p.add_argument("--no-title-page", action="store_true",
+                   help="표지 페이지(강의 제목·강사·날짜)를 생략한다.")
+    p.add_argument("--no-toc", action="store_true",
+                   help="목차 페이지를 생략한다.")
+    p.add_argument("--ref-bibliography", nargs="+", default=None, metavar="ITEM",
+                   help="원고 뒤 참고자료 페이지에 실을 항목(문자열)들. 여러 개 지정 가능. "
+                        "지정하지 않으면 참고자료 페이지 생략. "
+                        "이 옵션은 원고 뒷부분에 실릴 참고문헌 목록이며, "
+                        "--ref-file/--ref-url(프롬프트 근거로 쓰는 자료)과는 다르다.")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return p
 
@@ -341,7 +355,13 @@ def main(argv: list[str] | None = None) -> int:
                 break
 
     print(f"[4/4] docx 저장: {out_path}")
-    docx_writer.write_docx(out_path, args.title, sections, body_font=args.font)
+    docx_writer.write_docx(
+        out_path, args.title, sections, body_font=args.font,
+        author=args.author, date=args.date,
+        title_page=not args.no_title_page,
+        toc=not args.no_toc,
+        references=args.ref_bibliography,
+    )
 
     if not args.no_pdf:
         pdf_path, info = pdf_export.convert_to_pdf(out_path)
