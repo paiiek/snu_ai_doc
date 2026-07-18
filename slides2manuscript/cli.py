@@ -7,7 +7,7 @@ import os
 import sys
 
 from . import __version__, generate, docx_writer, llm, prompts, refs as refs_mod, pdf_export, font_setup
-from .extract import extract_slides, total_source_chars, looks_like_image_pdf
+from .extract import extract_slides, total_source_chars, looks_like_image_pdf, looks_text_light
 from .progress import Progress
 
 
@@ -203,6 +203,9 @@ def build_parser() -> argparse.ArgumentParser:
                         f"openai→{llm.DEFAULT_MODELS['openai']}")
     p.add_argument("--base-url", default=None,
                    help="OpenAI 호환 엔드포인트 주소(선택). OPENAI_BASE_URL 로도 지정 가능")
+    p.add_argument("--no-auto-vision", action="store_true",
+                   help="텍스트가 얇은 슬라이드에서 vision 활성화 여부를 물어보는 자동 감지를 끈다. "
+                        "스크립트 실행 등 비대화 환경에서 유용.")
     p.add_argument("--vision", action="store_true",
                    help="슬라이드를 이미지로 읽어 그림·도표·수식까지 반영(텍스트 적은 자료 권장). "
                         "비전 호출이 슬라이드 수만큼 추가돼 비용·시간이 늘어남")
@@ -287,6 +290,23 @@ def main(argv: list[str] | None = None) -> int:
 
     provider = llm.resolve_provider(args.provider)
     client = llm.LLMClient(provider, args.model, args.base_url)
+
+    # 텍스트가 얇은 자료(그림·도표 위주)면 vision 활성화를 대화형으로 권장한다.
+    # 사용자가 이미 --vision 을 붙였거나 자동 감지를 껐거나 non-tty면 건너뛴다.
+    if not args.vision and not args.no_auto_vision and nonempty and looks_text_light(slides):
+        if sys.stdin.isatty():
+            avg = total_source_chars(slides) / len(slides)
+            print(f"[감지] 슬라이드당 평균 {avg:.0f}자로 텍스트가 얇습니다 "
+                  "(그림·도표 위주로 보임).")
+            print("      --vision 을 켜면 그림·도표까지 읽어 원고에 반영합니다. "
+                  "다만 슬라이드당 비전 API 콜이 추가돼 시간·비용이 늘어납니다.")
+            try:
+                ans = input("      지금 vision 을 켤까요? (y/N): ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                ans = ""
+            if ans in ("y", "yes"):
+                args.vision = True
+                print("      → vision 활성화")
 
     if args.vision:
         print(f"[1.5/4] 비전으로 슬라이드 읽는 중 ({len(slides)}장, {provider}/{client.model})")

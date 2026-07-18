@@ -65,3 +65,15 @@ def looks_like_image_pdf(slides: list[Slide], threshold: int = 15) -> bool:
         return True
     avg = total_source_chars(slides) / len(slides)
     return avg < threshold
+
+
+def looks_text_light(slides: list[Slide], threshold: int = 150) -> bool:
+    """이미지 PDF 수준까지는 아니지만 텍스트가 얇아 vision 보강이 유용해 보이는 상태.
+
+    threshold 미만이면 그림·도표 위주 슬라이드로 보고 vision을 권장한다.
+    (looks_like_image_pdf 는 훨씬 낮은 임계값으로 강한 차단용이고, 이쪽은 권장용.)
+    """
+    if not slides:
+        return False
+    avg = total_source_chars(slides) / len(slides)
+    return avg < threshold
